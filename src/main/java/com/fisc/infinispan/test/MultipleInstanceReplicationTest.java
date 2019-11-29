@@ -3,7 +3,10 @@ package com.fisc.infinispan.test;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -77,28 +80,39 @@ public class MultipleInstanceReplicationTest
     {
         configureLogger();
         Logger logger = LogManager.getLogger( MultipleInstanceReplicationTest.class);
+        List<Future<EmbeddedCacheManager>> cacheManagerFutures = Collections.synchronizedList( new ArrayList<>());
         List<EmbeddedCacheManager> cacheManagers = new ArrayList<>();
         try
         {
-            int numberOfInstances = NUMER_OF_INSTANCES;
-            String initialHosts = getInitialHosts( HOSTNAME, START_PORT, numberOfInstances);
-            for (int port = 7010; port < 7010 + numberOfInstances; port++)
+            String initialHosts = getInitialHosts( HOSTNAME, START_PORT, NUMER_OF_INSTANCES);
+            for (int port = 7010; port < 7010 + NUMER_OF_INSTANCES; port++)
             {
-                String jgroupsConfigXml = getJgroupsConfigXml( HOSTNAME, port, initialHosts,
-                        NUMER_OF_INSTANCES - 1);
-                EmbeddedCacheManager cacheManager = startCache( jgroupsConfigXml);
-                cacheManager.getCache().put( "CacheKey" + String.format( "%02d", port - 7010 + 1), "NA");
-                cacheManagers.add( cacheManager);
+                final int bind_port = port;
+                String jgroupsConfigXml = getJgroupsConfigXml( HOSTNAME, port, initialHosts);
+                Future<EmbeddedCacheManager> cacheManagerFuture = Executors.newSingleThreadExecutor()
+                        .submit( () -> {
+                            EmbeddedCacheManager cacheManager = startCache( jgroupsConfigXml);
+                            cacheManager.getCache()
+                                    .put( "CacheKey" + String.format( "%02d", bind_port - 7010 + 1), "NA");
+                            return cacheManager;
+                        });
+
+                cacheManagerFutures.add( cacheManagerFuture);
+            }
+            logger.debug( "Waiting for all caches to start");
+            for (Future<EmbeddedCacheManager> cacheManagerFuture : cacheManagerFutures)
+            {
+                cacheManagers.add( cacheManagerFuture.get());
             }
             logger.debug( "Caches started");
             logger.debug( "Waiting ({} minute(s)) for cache to stabilize",
                     TimeUnit.MILLISECONDS.toMinutes( TIME_TO_WAIT_FOR_REPLICATION));
             Thread.sleep( TIME_TO_WAIT_FOR_REPLICATION);
             logger.debug( "Logging cache state");
-            for (int i = 0; i < cacheManagers.size(); i++)
+            for (EmbeddedCacheManager cacheManager : cacheManagers)
             {
-                List<String> sortedKeys = cacheManagers.get( i).getCache().keySet().stream()
-                        .map( o -> (String) o).sorted().collect( Collectors.toList());
+                List<String> sortedKeys = cacheManager.getCache().keySet().stream().map( o -> (String) o)
+                        .sorted().collect( Collectors.toList());
                 for (Object key : sortedKeys)
                 {
                     logger.debug( key);
@@ -116,14 +130,21 @@ public class MultipleInstanceReplicationTest
         }
     }
 
-    private static EmbeddedCacheManager startCache( String jgroupsConfigXml) throws Exception
+    private static EmbeddedCacheManager startCache( String jgroupsConfigXml)
     {
-        Configuration defaultCacheConfig = buildDefaultConfiguration();
-        GlobalConfiguration globalConfig = buildGlobalConfiguration( jgroupsConfigXml);
-        EmbeddedCacheManager embeddedCacheManager = new DefaultCacheManager( globalConfig,
-                defaultCacheConfig);
-        embeddedCacheManager.start();
-        return embeddedCacheManager;
+        try
+        {
+            Configuration defaultCacheConfig = buildDefaultConfiguration();
+            GlobalConfiguration globalConfig = buildGlobalConfiguration( jgroupsConfigXml);
+            EmbeddedCacheManager embeddedCacheManager = new DefaultCacheManager( globalConfig,
+                    defaultCacheConfig);
+            embeddedCacheManager.start();
+            return embeddedCacheManager;
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException( e);
+        }
     }
 
     private static String getInitialHosts( String hostName, int startPort, int hostCount)
@@ -132,13 +153,13 @@ public class MultipleInstanceReplicationTest
                 .collect( Collectors.joining( ","));
     }
 
-    private static String getJgroupsConfigXml( String host, int port, String initialHosts, int portRange)
+    private static String getJgroupsConfigXml( String host, int port, String initialHosts)
     {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?><config>\r\n"
                 + "  <TCP bind_addr=\"" + host + "\" bind_port=\"" + port
                 + "\" bundler_type=\"no-bundler\" enable_diagnostics=\"false\" port_range=\"0\" send_buf_size=\"640k\" sock_conn_timeout=\"300\" thread_naming_pattern=\"pl\" thread_pool.keep_alive_time=\"60000\" thread_pool.max_threads=\"200\" thread_pool.min_threads=\"0\"/>\r\n"
                 + "  <TCPPING async_discovery=\"true\" initial_hosts=\"" + initialHosts
-                + "\" port_range=\"0\"/>\r\n"
+                + "\" port_range=\"0\" num_discovery_runs=\"3\"/>\r\n"
                 + "  <MERGE3 max_interval=\"30000\" min_interval=\"10000\"/>\r\n" + "  <FD_SOCK/>\r\n"
                 + "  <FD_ALL interval=\"2000\" timeout=\"10000\" timeout_check_interval=\"1000\"/>\r\n"
                 + "  <VERIFY_SUSPECT timeout=\"1000\"/>\r\n"
