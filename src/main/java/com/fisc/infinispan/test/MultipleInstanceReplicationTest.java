@@ -87,7 +87,7 @@ public class MultipleInstanceReplicationTest
                 String jgroupsConfigXml = getJgroupsConfigXml( HOSTNAME, port, initialHosts,
                         NUMER_OF_INSTANCES - 1);
                 EmbeddedCacheManager cacheManager = startCache( jgroupsConfigXml);
-                cacheManager.getCache().put( "CacheKey" + (port - 7010 + 1), "NA");
+                cacheManager.getCache().put( "CacheKey" + String.format( "%02d", port - 7010 + 1), "NA");
                 cacheManagers.add( cacheManager);
             }
             logger.debug( "Caches started");
@@ -136,8 +136,7 @@ public class MultipleInstanceReplicationTest
     {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?><config>\r\n"
                 + "  <TCP bind_addr=\"" + host + "\" bind_port=\"" + port
-                + "\" bundler_type=\"no-bundler\" enable_diagnostics=\"false\" port_range=\"" + portRange
-                + "\" send_buf_size=\"640k\" sock_conn_timeout=\"300\" thread_naming_pattern=\"pl\" thread_pool.keep_alive_time=\"60000\" thread_pool.max_threads=\"200\" thread_pool.min_threads=\"0\"/>\r\n"
+                + "\" bundler_type=\"no-bundler\" enable_diagnostics=\"false\" port_range=\"0\" send_buf_size=\"640k\" sock_conn_timeout=\"300\" thread_naming_pattern=\"pl\" thread_pool.keep_alive_time=\"60000\" thread_pool.max_threads=\"200\" thread_pool.min_threads=\"0\"/>\r\n"
                 + "  <TCPPING async_discovery=\"true\" initial_hosts=\"" + initialHosts
                 + "\" port_range=\"0\"/>\r\n"
                 + "  <MERGE3 max_interval=\"30000\" min_interval=\"10000\"/>\r\n" + "  <FD_SOCK/>\r\n"
