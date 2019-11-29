@@ -8,7 +8,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.infinispan.commons.configuration.ClassWhiteList;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.core.config.Configurator;
+import org.apache.logging.log4j.core.config.builder.api.AppenderComponentBuilder;
+import org.apache.logging.log4j.core.config.builder.api.ConfigurationBuilderFactory;
+import org.apache.logging.log4j.core.config.builder.impl.BuiltConfiguration;
 import org.infinispan.commons.marshall.JavaSerializationMarshaller;
 import org.infinispan.configuration.cache.CacheMode;
 import org.infinispan.configuration.cache.Configuration;
@@ -28,8 +34,49 @@ public class MultipleInstanceReplicationTest
     private static final String HOSTNAME = "ind-hmu-dsk";
     private static final long TIME_TO_WAIT_FOR_REPLICATION = TimeUnit.MINUTES.toMillis( 1);
 
+    private static void configureLogger()
+    {
+        org.apache.logging.log4j.core.config.builder.api.ConfigurationBuilder<BuiltConfiguration> builder = ConfigurationBuilderFactory
+                .newConfigurationBuilder();
+        builder.setStatusLevel( Level.ERROR);
+        builder.setConfigurationName( "DefaultBuilder");
+        builder.add( getJGroupsLogAppender( builder, "jgroupsFileAppender"));
+        builder.add( getApplicationLogFileAppender( builder, "applicationFileAppender"));
+
+        builder.add( builder.newLogger( "org.jgroups", Level.TRACE)
+                .add( builder.newAppenderRef( "jgroupsFileAppender")))
+                .add( builder.newLogger( "com.fisc", Level.DEBUG)
+                        .add( builder.newAppenderRef( "applicationFileAppender")));
+        Configurator.initialize( builder.build());
+    }
+
+    private static AppenderComponentBuilder getJGroupsLogAppender(
+            org.apache.logging.log4j.core.config.builder.api.ConfigurationBuilder<BuiltConfiguration> builder,
+            String appenderName)
+    {
+        AppenderComponentBuilder jgroupsAppenderBuilder = builder.newAppender( appenderName, "File")
+                .addAttribute( "fileName", "logs/jgroups.log").addAttribute( "append", "false");
+        jgroupsAppenderBuilder.add( builder.newLayout( "PatternLayout").addAttribute( "pattern",
+                "%d [%t] %-5level: %msg%n%throwable"));
+        return jgroupsAppenderBuilder;
+    }
+
+    private static AppenderComponentBuilder getApplicationLogFileAppender(
+            org.apache.logging.log4j.core.config.builder.api.ConfigurationBuilder<BuiltConfiguration> builder,
+            String appenderName)
+    {
+        AppenderComponentBuilder applicationAppenderBuilder = builder
+                .newAppender( appenderName, "File")
+                .addAttribute( "fileName", "logs/application.log").addAttribute( "append", "false");
+        applicationAppenderBuilder.add( builder.newLayout( "PatternLayout").addAttribute( "pattern",
+                "%d [%t] %-5level: %msg%n%throwable"));
+        return applicationAppenderBuilder;
+    }
+
     public static void main( String[] args) throws Exception
     {
+        configureLogger();
+        Logger logger = LogManager.getLogger( MultipleInstanceReplicationTest.class);
         List<EmbeddedCacheManager> cacheManagers = new ArrayList<>();
         try
         {
@@ -43,21 +90,22 @@ public class MultipleInstanceReplicationTest
                 cacheManager.getCache().put( "CacheKey" + (port - 7010 + 1), "NA");
                 cacheManagers.add( cacheManager);
             }
-            System.out.println( "Caches started");
-            System.out.println( "Waiting for cache to stabilize");
+            logger.debug( "Caches started");
+            logger.debug( "Waiting ({} minute(s)) for cache to stabilize",
+                    TimeUnit.MILLISECONDS.toMinutes( TIME_TO_WAIT_FOR_REPLICATION));
             Thread.sleep( TIME_TO_WAIT_FOR_REPLICATION);
-            System.out.println( "Logging cache state");
+            logger.debug( "Logging cache state");
             for (int i = 0; i < cacheManagers.size(); i++)
             {
                 List<String> sortedKeys = cacheManagers.get( i).getCache().keySet().stream()
                         .map( o -> (String) o).sorted().collect( Collectors.toList());
                 for (Object key : sortedKeys)
                 {
-                    System.out.println( key);
+                    logger.debug( key);
                 }
-                System.out.println( "######################");
+                logger.debug( "######################");
             }
-            System.out.println( "Stopping cache");
+            logger.debug( "Stopping cache");
         }
         finally
         {
@@ -122,7 +170,7 @@ public class MultipleInstanceReplicationTest
         GlobalConfigurationBuilder configBuilder = new GlobalConfigurationBuilder();
         configBuilder.transport().transport( getJGroupsTransport( jgroupsConfigXml))
                 .clusterName( "FiscTestCluster");
-        configBuilder.serialization().marshaller( getJavaSerializationMarshaller());
+        configBuilder.serialization().marshaller( new JavaSerializationMarshaller());
         return configBuilder.defaultCacheName( "FiscDefaultCache").build();
     }
 
@@ -131,21 +179,5 @@ public class MultipleInstanceReplicationTest
         JChannel jchannel = new JChannel(
                 new ByteArrayInputStream( jgroupsConfigXml.getBytes( StandardCharsets.UTF_8)));
         return new JGroupsTransport( jchannel);
-    }
-
-    private static JavaSerializationMarshaller getJavaSerializationMarshaller()
-    {
-        List<String> allowedClassPatterns = getRegexForSerializationAllowedClasses();
-        ClassWhiteList whiteList = new ClassWhiteList( allowedClassPatterns);
-        return new JavaSerializationMarshaller( whiteList);
-    }
-
-    private static List<String> getRegexForSerializationAllowedClasses()
-    {
-        List<String> allowedClassPatterns = new ArrayList<>();
-        allowedClassPatterns.add( "java\\..*");
-        allowedClassPatterns.add( "com\\.fisc\\..*");
-        allowedClassPatterns.add( "com\\.fii\\..*");
-        return allowedClassPatterns;
     }
 }
