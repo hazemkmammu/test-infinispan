@@ -26,6 +26,7 @@ public class MultipleInstanceReplicationTest
     private static final int NUMER_OF_INSTANCES = 25;
     private static final int START_PORT = 7010;
     private static final String HOSTNAME = "ind-hmu-dsk";
+    private static final long TIME_TO_WAIT_FOR_REPLICATION = TimeUnit.MINUTES.toMillis( 1);
 
     public static void main( String[] args) throws Exception
     {
@@ -36,14 +37,15 @@ public class MultipleInstanceReplicationTest
             String initialHosts = getInitialHosts( HOSTNAME, START_PORT, numberOfInstances);
             for (int port = 7010; port < 7010 + numberOfInstances; port++)
             {
-                String jgroupsConfigXml = getJgroupsConfigXml( HOSTNAME, port, initialHosts);
+                String jgroupsConfigXml = getJgroupsConfigXml( HOSTNAME, port, initialHosts,
+                        NUMER_OF_INSTANCES - 1);
                 EmbeddedCacheManager cacheManager = startCache( jgroupsConfigXml);
                 cacheManager.getCache().put( "CacheKey" + (port - 7010 + 1), "NA");
                 cacheManagers.add( cacheManager);
             }
             System.out.println( "Caches started");
             System.out.println( "Waiting for cache to stabilize");
-            Thread.sleep( 15 * 60 * 1000);
+            Thread.sleep( TIME_TO_WAIT_FOR_REPLICATION);
             System.out.println( "Logging cache state");
             for (int i = 0; i < cacheManagers.size(); i++)
             {
@@ -62,12 +64,11 @@ public class MultipleInstanceReplicationTest
             for (EmbeddedCacheManager embeddedCacheManager : cacheManagers)
             {
                 embeddedCacheManager.stop();
-                Thread.sleep( 250);
             }
         }
     }
 
-    public static EmbeddedCacheManager startCache( String jgroupsConfigXml) throws Exception
+    private static EmbeddedCacheManager startCache( String jgroupsConfigXml) throws Exception
     {
         Configuration defaultCacheConfig = buildDefaultConfiguration();
         GlobalConfiguration globalConfig = buildGlobalConfiguration( jgroupsConfigXml);
@@ -83,11 +84,12 @@ public class MultipleInstanceReplicationTest
                 .collect( Collectors.joining( ","));
     }
 
-    private static String getJgroupsConfigXml( String host, int port, String initialHosts)
+    private static String getJgroupsConfigXml( String host, int port, String initialHosts, int portRange)
     {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\"?><config>\r\n"
                 + "  <TCP bind_addr=\"" + host + "\" bind_port=\"" + port
-                + "\" bundler_type=\"no-bundler\" enable_diagnostics=\"false\" port_range=\"6\" send_buf_size=\"640k\" sock_conn_timeout=\"300\" thread_naming_pattern=\"pl\" thread_pool.keep_alive_time=\"60000\" thread_pool.max_threads=\"200\" thread_pool.min_threads=\"0\"/>\r\n"
+                + "\" bundler_type=\"no-bundler\" enable_diagnostics=\"false\" port_range=\"" + portRange
+                + "\" send_buf_size=\"640k\" sock_conn_timeout=\"300\" thread_naming_pattern=\"pl\" thread_pool.keep_alive_time=\"60000\" thread_pool.max_threads=\"200\" thread_pool.min_threads=\"0\"/>\r\n"
                 + "  <TCPPING async_discovery=\"true\" initial_hosts=\"" + initialHosts
                 + "\" port_range=\"0\"/>\r\n"
                 + "  <MERGE3 max_interval=\"30000\" min_interval=\"10000\"/>\r\n" + "  <FD_SOCK/>\r\n"
